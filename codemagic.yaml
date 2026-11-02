@@ -11,6 +11,8 @@ workflows:
     max_build_duration: 30
     instance_type: linux_x2
     environment:
+      android_signing:
+        - atoms_mobile_demo
       vars:
         CODE_URL: "PLACEHOLDER"
         APP_NAME: "PLACEHOLDER"
@@ -62,6 +64,36 @@ workflows:
         script: |
           cd $CM_BUILD_DIR
           ./node_modules/.bin/expo prebuild --platform android --no-install
+
+      - name: Configure Android release signing
+        script: |
+          set -eu
+          : "${CM_KEYSTORE_PATH:?Missing Codemagic keystore}"
+          : "${CM_KEYSTORE_PASSWORD:?Missing keystore password}"
+          : "${CM_KEY_ALIAS:?Missing key alias}"
+          : "${CM_KEY_PASSWORD:?Missing key password}"
+          test -f "$CM_KEYSTORE_PATH"
+          cd "$CM_BUILD_DIR"
+          test -f android/app/build.gradle
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          // Use the team keystore for release APK and AAB builds.
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv('CM_KEYSTORE_PATH'))
+                      storePassword System.getenv('CM_KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('CM_KEY_ALIAS')
+                      keyPassword System.getenv('CM_KEY_PASSWORD')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          GRADLE
 
       - name: Build APK
         script: |
