@@ -1,0 +1,9 @@
+{
+  "App.tsx": "b68f1793733aee07cfd599a7dc3b6666f91190e97c6dd43f74cac4e6d6e6bec4",
+  "index.js": "af10e01cf5fa6d399a83829926cc80d935c1dca8fb01313ab7cb54aab84c028b",
+  "app.config.js": "744b86b1c6c40fd46ad48380bb411fc754e0a24ec4364bdc5d523f55ac3f440f",
+  "tsconfig.json": "02ccee792314b11b9759103f5ee7410a7a9800cf69362a89c797c44e09a56fa6",
+  "package.json": "af8ad6fa6141fca6585684bfafb314d6181121351f2330d5fed98b71ebb66ab9",
+  "package-lock.json": "1975df8ee34e8d888d2fda9b1e8e1b7f5b00c198963c09fe08fb9811a013c36d",
+  "src/policy.mjs": "82c674699ce332dc86c23187e29d88706c2a254a91fccd7b9e9290e830e199b3"
+}
