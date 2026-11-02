@@ -1,0 +1,131 @@
+# Codemagic 壳仓库 (build-carrier) 配置文件
+# 环境变量通过 API 动态注入：
+#   CODE_URL             - 源码 zip 的 CDN 下载地址
+#   ARTIFACT_UPLOAD_URL  - APK 上传到 COS 的 presigned PUT URL
+#   STATUS_UPLOAD_URL    - 构建状态 JSON 上传到 COS 的 presigned PUT URL
+#   CHAT_ID / BUILD_TARGET - 业务参数
+
+workflows:
+  android-build:
+    name: Android Build
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      vars:
+        CODE_URL: "PLACEHOLDER"
+        APP_NAME: "PLACEHOLDER"
+        CHAT_ID: "PLACEHOLDER"
+        BUILD_TARGET: "apk"
+        ARTIFACT_UPLOAD_URL: "PLACEHOLDER"
+        STATUS_UPLOAD_URL: "PLACEHOLDER"
+      node: 20
+      java: 17
+    scripts:
+      - name: Download and extract source
+        script: |
+          echo "Downloading source..."
+          curl -fSL "$CODE_URL" -o /tmp/source.zip
+          ls -lh /tmp/source.zip
+          unzip -o /tmp/source.zip -d $CM_BUILD_DIR
+          test -f "$CM_BUILD_DIR/package.json" || { echo "FATAL: package.json missing"; exit 1; }
+          echo "Source ready."
+
+      - name: Install dependencies
+        script: |
+          cd $CM_BUILD_DIR
+          npm install
+
+      - name: Prepare Expo config
+        script: |
+          cd $CM_BUILD_DIR
+          node -e "
+          const fs = require('fs');
+          const raw = fs.readFileSync('app.json', 'utf8');
+          const config = JSON.parse(raw);
+          const expo = config.expo || config;
+          if (!expo.android) expo.android = {};
+          if (!expo.android.package) {
+            const slug = (expo.slug || 'app').replace(/[^a-zA-Z0-9]/g, '');
+            expo.android.package = 'com.mgx.' + slug.toLowerCase();
+            console.log('Injected android.package:', expo.android.package);
+          } else {
+            console.log('android.package already set:', expo.android.package);
+          }
+          if (!expo.ios) expo.ios = {};
+          if (!expo.ios.bundleIdentifier) {
+            expo.ios.bundleIdentifier = expo.android.package;
+          }
+          fs.writeFileSync('app.json', JSON.stringify(config, null, 2));
+          "
+
+      - name: Expo prebuild
+        script: |
+          cd $CM_BUILD_DIR
+          ./node_modules/.bin/expo prebuild --platform android --no-install
+
+      - name: Build APK
+        script: |
+          cd $CM_BUILD_DIR/android
+          if [ "$BUILD_TARGET" = "aab" ]; then
+            ./gradlew bundleRelease
+          else
+            ./gradlew assembleRelease
+          fi
+
+    artifacts:
+      - $CM_BUILD_DIR/android/app/build/outputs/**/*.apk
+      - $CM_BUILD_DIR/android/app/build/outputs/**/*.aab
+
+    publishing:
+      scripts:
+        - name: Upload results to COS
+          script: |
+            set +e
+
+            STATUS="failed"
+            ERROR_MSG="Build failed"
+            ARTIFACT_SIZE=0
+
+            if [ "$BUILD_TARGET" = "aab" ]; then
+              ARTIFACT=$(find $CM_BUILD_DIR/android -name "*.aab" -path "*/release/*" 2>/dev/null | head -1)
+              ARTIFACT_CONTENT_TYPE="application/octet-stream"
+              ARTIFACT_LABEL="AAB"
+            else
+              ARTIFACT=$(find $CM_BUILD_DIR/android -name "*.apk" -path "*/release/*" 2>/dev/null | head -1)
+              ARTIFACT_CONTENT_TYPE="application/vnd.android.package-archive"
+              ARTIFACT_LABEL="APK"
+            fi
+
+            if [ -n "$ARTIFACT" ] && [ -f "$ARTIFACT" ]; then
+              ARTIFACT_SIZE=$(stat -f%z "$ARTIFACT" 2>/dev/null || stat -c%s "$ARTIFACT" 2>/dev/null || echo 0)
+              echo "Uploading $ARTIFACT_LABEL ($ARTIFACT_SIZE bytes): $ARTIFACT"
+
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X PUT \
+                -H "Content-Type: $ARTIFACT_CONTENT_TYPE" \
+                -T "$ARTIFACT" \
+                "$ARTIFACT_UPLOAD_URL")
+
+              if [ "$HTTP_CODE" = "200" ]; then
+                STATUS="success"
+                ERROR_MSG=""
+                echo "$ARTIFACT_LABEL uploaded successfully"
+              else
+                ERROR_MSG="$ARTIFACT_LABEL upload to COS failed with HTTP $HTTP_CODE"
+                echo "$ERROR_MSG"
+              fi
+            else
+              ERROR_MSG="No release $ARTIFACT_LABEL found after build"
+              echo "$ERROR_MSG"
+            fi
+
+            echo "{\"status\":\"$STATUS\",\"error\":\"$ERROR_MSG\",\"artifact_size\":$ARTIFACT_SIZE}" > /tmp/status.json
+            echo "Status: $(cat /tmp/status.json)"
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X PUT \
+              -H "Content-Type: application/json" \
+              -T /tmp/status.json \
+              "$STATUS_UPLOAD_URL")
+
+            echo "Status file uploaded: HTTP $HTTP_CODE"
