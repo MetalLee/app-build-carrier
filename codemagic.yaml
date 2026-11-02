@@ -161,3 +161,20 @@ workflows:
               "$STATUS_UPLOAD_URL")
 
             echo "Status file uploaded: HTTP $HTTP_CODE"
+
+  website-apk:
+    name: Fixed Website APK
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      android_signing:
+        - atoms_mobile_demo
+      node: 20
+      java: 17
+    scripts:
+      - name: Verify fixed input, compile, sign and upload APK
+        script: |
+          set +x
+          set -eu
+          cd "$CM_BUILD_DIR"
+          python3 scripts/build_fixed_apk.py
