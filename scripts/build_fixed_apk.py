@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_SHA = '9ab7706ed762fdb92e403c30a5f2aaf2eb388ecb'
+TEMPLATE_SHA = '6e29ad7e3ae124b3411f60d9e540f98021faaaf6'
 FILES = json.loads((ROOT / 'scripts/template-files.json').read_text())
 SIGNING_REF = 'atoms_mobile_demo'
 
@@ -34,7 +34,7 @@ def validate(env):
                 'SUBMISSION_KEY', 'SIGNING_REF', 'CM_KEYSTORE_PATH',
                 'CM_KEYSTORE_PASSWORD', 'CM_KEY_ALIAS', 'CM_KEY_PASSWORD'):
         require(bool(env.get(key)))
-    require(env['BUILD_TARGET'] == 'apk')
+    require(env['BUILD_TARGET'] in ('apk', 'aab'))
     require(env['SIGNING_REF'] == SIGNING_REF and env['CM_KEY_ALIAS'] == 'atoms-mobile-demo')
     require(Path(env['CM_KEYSTORE_PATH']).is_file())
     require(env['TEMPLATE_SHA'] == TEMPLATE_SHA)
@@ -78,7 +78,7 @@ def extract(archive, destination, digest):
         entries = source.infolist()
         names = [entry.filename for entry in entries]
         required = set(FILES) | {'container.config.json'}
-        require(set(names) in (required, required | {'assets/icon.png'}))
+        require(required <= set(names) <= required | {'assets/icon.png', 'assets/splash.png'})
         require(len(names) == len(set(names)))
         require(sum(entry.file_size for entry in entries) <= 32 * 1024 * 1024)
         for entry in entries:
@@ -132,20 +132,38 @@ def build(env):
                 gradle.write(SIGNING)
             signing_env = dict(public_env)
             signing_env.update({k: env[k] for k in ('CM_KEYSTORE_PATH', 'CM_KEYSTORE_PASSWORD', 'CM_KEY_ALIAS', 'CM_KEY_PASSWORD')})
-            run(['./gradlew', '--no-daemon', 'assembleRelease'], app / 'android', signing_env)
-            outputs = list((app / 'android/app/build/outputs/apk').rglob('*.apk'))
-            artifact = app / 'android/app/build/outputs/apk/release/app-release.apk'
+            target = env['BUILD_TARGET']
+            task, directory = ('assembleRelease', 'apk') if target == 'apk' else ('bundleRelease', 'bundle')
+            run(['./gradlew', '--no-daemon', task], app / 'android', signing_env)
+            output_dir = app / 'android/app/build/outputs' / directory
+            outputs = list(output_dir.rglob('*.' + target))
+            artifact = output_dir / 'release' / ('app-release.' + target)
             require(outputs == [artifact] and artifact.stat().st_size > 0)
-            tools = Path(env['ANDROID_SDK_ROOT']) / 'build-tools'
-            verifier = sorted(tools.glob('*/apksigner'), key=lambda p: tuple(int(n) for n in p.parent.name.split('.')))[-1]
-            run([str(verifier), 'verify', '--verbose', str(artifact)], app, public_env)
+            stage = 'signature verification'
+            if target == 'apk':
+                tools = Path(env['ANDROID_SDK_ROOT']) / 'build-tools'
+                verifier = sorted(tools.glob('*/apksigner'), key=lambda p: tuple(int(n) for n in p.parent.name.split('.')))[-1]
+                certificate = run(['keytool', '-exportcert', '-keystore', env['CM_KEYSTORE_PATH'],
+                                   '-storepass:env', 'CM_KEYSTORE_PASSWORD', '-alias', env['CM_KEY_ALIAS']], app, signing_env)
+                verified = run([str(verifier), 'verify', '--verbose', '--print-certs', str(artifact)], app, public_env).decode()
+                digests = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)$', verified, re.M)
+                require([d.lower() for d in digests] == [hashlib.sha256(certificate).hexdigest()])
+            else:
+                # Trust only the selected keystore alias; strict rejects unsigned entries/wrong signers.
+                verified = run(['jarsigner', '-J-Duser.language=en', '-J-Duser.country=US',
+                                '-verify', '-strict', '-keystore', env['CM_KEYSTORE_PATH'],
+                                '-storepass:env', 'CM_KEYSTORE_PASSWORD', str(artifact),
+                                env['CM_KEY_ALIAS']], app, signing_env).decode()
+                require('jar verified.' in verified)
+                with zipfile.ZipFile(artifact) as bundle:
+                    require({'BundleConfig.pb', 'base/manifest/AndroidManifest.xml'} <= set(bundle.namelist()))
             stage = 'upload'
             transfer(env['ARTIFACT_UPLOAD_URL'], artifact=artifact)
-        print('fixed APK uploaded')
+        print('fixed Android uploaded')
         return 0
     except Exception:
         # Deliberately bounded diagnostics: exceptions may contain presigned URLs/secrets.
-        print('fixed APK failed: ' + stage)
+        print('fixed Android failed: ' + stage)
         return 1
 
 
