@@ -52,10 +52,11 @@ class CarrierTests(unittest.TestCase):
 
     def test_contract(self):
         carrier.validate(self.env)
+        carrier.validate(dict(self.env, BUILD_TARGET='aab'))
         for key, value in [('CARRIER_SHA', '0' * 40), ('SOURCE_SHA256', 'bad'),
                            ('TEMPLATE_SHA', '0' * 40), ('DEPENDENCY_LOCK_SHA256', '0' * 64),
                            ('SIGNING_REF', 'foreign'), ('CM_KEY_ALIAS', 'foreign'),
-                           ('BUILD_TARGET', 'aab'), ('ATTEMPT', '0'),
+                           ('BUILD_TARGET', 'ipa'), ('ATTEMPT', '0'),
                            ('CODE_URL', 'http://example.com')]:
             with self.subTest(key=key), self.assertRaises(ValueError):
                 carrier.validate(dict(self.env, **{key: value}))
@@ -73,6 +74,20 @@ class CarrierTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     carrier.extract(archive, self.root / 'bad', hashlib.sha256(data).hexdigest())
 
+    def test_optional_appearance_assets(self):
+        archive = self.root / 'input.zip'
+        for assets in ({}, {'assets/icon.png': b'icon'}, {'assets/splash.png': b'splash'},
+                       {'assets/icon.png': b'icon', 'assets/splash.png': b'splash'}):
+            data = self.archive(dict(self.files, **assets))
+            archive.write_bytes(data)
+            carrier.extract(archive, self.root / 'appearance', hashlib.sha256(data).hexdigest())
+        files = dict(self.files)
+        del files['assets/default-splash.png']
+        data = self.archive(files)
+        archive.write_bytes(data)
+        with self.assertRaises(ValueError):
+            carrier.extract(archive, self.root / 'missing', hashlib.sha256(data).hexdigest())
+
     def test_symlink_and_duplicate(self):
         for duplicate in [False, True]:
             out = io.BytesIO()
@@ -89,55 +104,73 @@ class CarrierTests(unittest.TestCase):
                 carrier.extract(path, self.root / 'bad', hashlib.sha256(out.getvalue()).hexdigest())
 
     def test_pipeline_and_failures_are_redacted(self):
-        for failure in [None, 'npm', './node_modules/.bin/expo', './gradlew', 'apksigner', 'upload', 'download', 'checksum', 'extra-apk', 'empty-apk']:
-            commands, uploads = [], []
+        for target in ('apk', 'aab'):
+            for failure in [None, 'npm', './node_modules/.bin/expo', './gradlew', 'apksigner', 'upload', 'download', 'checksum', 'extra-apk', 'empty-apk', 'missing', 'wrong-signer', 'unsigned', 'bad-bundle']:
+                commands, uploads = [], []
 
-            def run(args, cwd, env=None):
-                if args[0] == 'git':
-                    return self.env['CARRIER_SHA'].encode()
-                commands.append(args)
-                self.assertNotIn('CODE_URL', env)
-                self.assertNotIn('ARTIFACT_UPLOAD_URL', env)
-                if args[0] != './gradlew':
-                    self.assertNotIn('CM_KEY_PASSWORD', env)
-                if args[0] == failure or (failure == 'apksigner' and args[0].endswith('/apksigner')):
-                    raise RuntimeError('URL_SECRET KEY_SECRET PUT_SECRET')
-                cwd = Path(cwd)
-                if args[0].endswith('/expo'):
-                    path = cwd / 'android/app/build.gradle'
-                    path.parent.mkdir(parents=True)
-                    path.touch()
-                if args[0] == './gradlew':
-                    self.assertIn('signingConfig signingConfigs.release', (cwd / 'app/build.gradle').read_text())
-                    path = cwd / 'app/build/outputs/apk/release/app-release.apk'
-                    path.parent.mkdir(parents=True)
-                    path.write_bytes(b'' if failure == 'empty-apk' else b'simulated APK')
-                    if failure == 'extra-apk':
-                        path.with_name('other.apk').write_bytes(b'extra')
-                return b''
+                def run(args, cwd, env=None):
+                    if args[0] == 'git':
+                        return self.env['CARRIER_SHA'].encode()
+                    commands.append(args)
+                    self.assertNotIn('CODE_URL', env)
+                    self.assertNotIn('ARTIFACT_UPLOAD_URL', env)
+                    if args[0] not in ('./gradlew', 'jarsigner', 'keytool'):
+                        self.assertNotIn('CM_KEY_PASSWORD', env)
+                    if args[0] == failure or (failure == 'apksigner' and args[0].endswith('/apksigner')):
+                        raise RuntimeError('URL_SECRET KEY_SECRET PUT_SECRET')
+                    cwd = Path(cwd)
+                    if args[0].endswith('/expo'):
+                        path = cwd / 'android/app/build.gradle'
+                        path.parent.mkdir(parents=True)
+                        path.touch()
+                    if args[0] == './gradlew':
+                        self.assertIn('signingConfig signingConfigs.release', (cwd / 'app/build.gradle').read_text())
+                        path = cwd / ('app/build/outputs/' + ('apk' if target == 'apk' else 'bundle') + '/release/app-release.' + target)
+                        path.parent.mkdir(parents=True)
+                        self.assertEqual(args[-1], 'assembleRelease' if target == 'apk' else 'bundleRelease')
+                        if failure == 'missing':
+                            return b''
+                        if target == 'aab' and failure != 'empty-apk':
+                            path.write_bytes(self.archive({'BundleConfig.pb': b'config', 'base/manifest/AndroidManifest.xml': b'manifest'} if failure != 'bad-bundle' else {}))
+                        else:
+                            path.write_bytes(b'' if failure == 'empty-apk' else b'simulated APK')
+                        if failure == 'extra-apk':
+                            path.with_name('other.' + target).write_bytes(b'extra')
+                    if args[0] == 'keytool':
+                        return b'certificate'
+                    if args[0].endswith('/apksigner'):
+                        if failure == 'unsigned':
+                            raise RuntimeError('KEY_SECRET')
+                        return ('Signer #1 certificate SHA-256 digest: ' + hashlib.sha256(b'wrong' if failure == 'wrong-signer' else b'certificate').hexdigest()).encode()
+                    if args[0] == 'jarsigner':
+                        self.assertIn('-strict', args)
+                        self.assertEqual(args[-1], 'atoms-mobile-demo')
+                        if failure in ('wrong-signer', 'apksigner'):
+                            raise RuntimeError('KEY_SECRET')
+                        return b'jar is unsigned.' if failure == 'unsigned' else b'jar verified.'
+                    return b''
 
-            def transfer(url, destination=None, artifact=None):
-                if destination:
-                    if failure == 'download':
-                        raise RuntimeError('URL_SECRET')
-                    destination.write_bytes(b'corrupt' if failure == 'checksum' else self.zip)
+                def transfer(url, destination=None, artifact=None):
+                    if destination:
+                        if failure == 'download':
+                            raise RuntimeError('URL_SECRET')
+                        destination.write_bytes(b'corrupt' if failure == 'checksum' else self.zip)
+                    else:
+                        if failure == 'upload':
+                            raise RuntimeError('PUT_SECRET')
+                        uploads.append(artifact.read_bytes())
+
+                output = io.StringIO()
+                with patch.object(carrier, 'run', side_effect=run), patch.object(carrier, 'transfer', side_effect=transfer), contextlib.redirect_stdout(output):
+                    result = carrier.build(dict(self.env, BUILD_TARGET=target))
+                self.assertEqual(result, int(failure is not None and not (failure == 'bad-bundle' and target == 'apk')))
+                self.assertEqual(len(uploads), int(failure is None or (failure == 'bad-bundle' and target == 'apk')))
+                for secret in ['URL_SECRET', 'KEY_SECRET', 'PUT_SECRET']:
+                    self.assertNotIn(secret, output.getvalue())
+                if failure not in ('download', 'checksum'):
+                    self.assertEqual(commands[0], ['npm', 'ci', '--no-audit', '--no-fund'])
                 else:
-                    if failure == 'upload':
-                        raise RuntimeError('PUT_SECRET')
-                    uploads.append(artifact.read_bytes())
-
-            output = io.StringIO()
-            with patch.object(carrier, 'run', side_effect=run), patch.object(carrier, 'transfer', side_effect=transfer), contextlib.redirect_stdout(output):
-                result = carrier.build(self.env)
-            self.assertEqual(result, int(failure is not None))
-            self.assertEqual(len(uploads), int(failure is None))
-            for secret in ['URL_SECRET', 'KEY_SECRET', 'PUT_SECRET']:
-                self.assertNotIn(secret, output.getvalue())
-            if failure not in ('download', 'checksum'):
-                self.assertEqual(commands[0], ['npm', 'ci', '--no-audit', '--no-fund'])
-            else:
-                self.assertEqual(commands, [])
-
+                    self.assertEqual(commands, [])
     def test_put_contract_and_failure(self):
         artifact = self.root / 'app.apk'
         artifact.write_bytes(b'apk')

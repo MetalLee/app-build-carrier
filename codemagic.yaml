@@ -163,7 +163,7 @@ workflows:
             echo "Status file uploaded: HTTP $HTTP_CODE"
 
   website-apk:
-    name: Fixed Website APK
+    name: Fixed Website Android APK or AAB
     max_build_duration: 30
     instance_type: linux_x2
     environment:
@@ -172,7 +172,7 @@ workflows:
       node: 20
       java: 17
     scripts:
-      - name: Verify fixed input, compile, sign and upload APK
+      - name: Verify fixed input, compile, sign and upload Android artifact
         script: |
           set +x
           set -eu
