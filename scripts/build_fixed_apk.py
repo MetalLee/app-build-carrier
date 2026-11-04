@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_SHA = '9ab7706ed762fdb92e403c30a5f2aaf2eb388ecb'
+TEMPLATE_SHA = '6e29ad7e3ae124b3411f60d9e540f98021faaaf6'
 FILES = json.loads((ROOT / 'scripts/template-files.json').read_text())
 SIGNING_REF = 'atoms_mobile_demo'
 
@@ -78,7 +78,7 @@ def extract(archive, destination, digest):
         entries = source.infolist()
         names = [entry.filename for entry in entries]
         required = set(FILES) | {'container.config.json'}
-        require(set(names) in (required, required | {'assets/icon.png'}))
+        require(required <= set(names) <= required | {'assets/icon.png', 'assets/splash.png'})
         require(len(names) == len(set(names)))
         require(sum(entry.file_size for entry in entries) <= 32 * 1024 * 1024)
         for entry in entries:
