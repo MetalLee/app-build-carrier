@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_SHA = '6e29ad7e3ae124b3411f60d9e540f98021faaaf6'
+TEMPLATE_SHA = 'b022e7d25d3e482462029608378924ae8a77c19f'
 FILES = json.loads((ROOT / 'scripts/template-files.json').read_text())
 SIGNING_REF = 'atoms_mobile_demo'
 
@@ -68,7 +68,7 @@ def transfer(url, destination=None, artifact=None):
                 total = 0
                 while chunk := response.read(1024 * 1024):
                     total += len(chunk)
-                    require(total <= 32 * 1024 * 1024)
+                    require(total <= 220 * 1024 * 1024)
                     output.write(chunk)
 
 
@@ -78,9 +78,16 @@ def extract(archive, destination, digest):
         entries = source.infolist()
         names = [entry.filename for entry in entries]
         required = set(FILES) | {'container.config.json'}
-        require(required <= set(names) <= required | {'assets/icon.png', 'assets/splash.png'})
+        web = {name for name in names if name.startswith('web/')}
+        require(required <= set(names) <= required | {'assets/icon.png', 'assets/splash.png'} | web)
+        require(not web or 'web/index.html' in web)
+        require(len(web) <= 20000)
+        for name in web:
+            require('\\' not in name and all(part and not part.startswith('.') for part in name.split('/')))
+        runtime = json.loads(source.read('container.config.json'))
+        require(bool(web) == (runtime.get('bundled_web') is True))
         require(len(names) == len(set(names)))
-        require(sum(entry.file_size for entry in entries) <= 32 * 1024 * 1024)
+        require(sum(entry.file_size for entry in entries) <= 220 * 1024 * 1024)
         for entry in entries:
             mode = entry.external_attr >> 16
             require(stat.S_IFMT(mode) in (0, stat.S_IFREG))
@@ -157,6 +164,13 @@ def build(env):
                 require('jar verified.' in verified)
                 with zipfile.ZipFile(artifact) as bundle:
                     require({'BundleConfig.pb', 'base/manifest/AndroidManifest.xml'} <= set(bundle.namelist()))
+            if (app / 'web').is_dir():
+                stage = 'bundled asset verification'
+                prefix = 'base/assets/web/' if target == 'aab' else 'assets/web/'
+                with zipfile.ZipFile(artifact) as packaged:
+                    for source in (app / 'web').rglob('*'):
+                        if source.is_file():
+                            require(packaged.read(prefix + source.relative_to(app / 'web').as_posix()) == source.read_bytes())
             stage = 'upload'
             transfer(env['ARTIFACT_UPLOAD_URL'], artifact=artifact)
         print('fixed Android uploaded')
