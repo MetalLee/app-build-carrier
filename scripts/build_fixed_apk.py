@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_SHA = '1ef0940b6a937358e0284fe5b6a54c0a85ac83fa'
+TEMPLATE_SHA = '921ddf6f8f28fa0df29d6c177cbe01ce37660a50'
 FILES = json.loads((ROOT / 'scripts/template-files.json').read_text())
 SIGNING_REF = 'atoms_mobile_demo'
 
