@@ -17,6 +17,22 @@ spec.loader.exec_module(carrier)
 
 
 class CarrierTests(unittest.TestCase):
+    def test_bundled_assets_cannot_escape_or_replace_template(self):
+        self.files['container.config.json'] = b'{"bundled_web":true}'
+        self.files['web/index.html'] = b'<html>Offline</html>'
+        self.files['web/assets/app.js'] = b'console.log("offline")'
+        archive = self.root / 'bundled.zip'
+        payload = self.archive(self.files)
+        archive.write_bytes(payload)
+        carrier.extract(archive, self.root / 'valid', hashlib.sha256(payload).hexdigest())
+        self.assertEqual((self.root / 'valid/web/index.html').read_bytes(), self.files['web/index.html'])
+        for name in ['web/../../app.config.js', 'web/.env', 'web//bad', 'web/../secret']:
+            with self.subTest(name=name):
+                payload = self.archive({**self.files, name: b'unsafe'})
+                archive.write_bytes(payload)
+                with self.assertRaises(ValueError):
+                    carrier.extract(archive, self.root / 'invalid', hashlib.sha256(payload).hexdigest())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
