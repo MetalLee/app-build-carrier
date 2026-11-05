@@ -35,7 +35,13 @@ workflows:
       - name: Install dependencies
         script: |
           cd $CM_BUILD_DIR
-          npm install
+          if [ -f pnpm-lock.yaml ]; then
+            corepack pnpm install --frozen-lockfile --shamefully-hoist
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Prepare Expo config
         script: |
@@ -47,8 +53,9 @@ workflows:
           const expo = config.expo || config;
           if (!expo.android) expo.android = {};
           if (!expo.android.package) {
-            const slug = (expo.slug || 'app').replace(/[^a-zA-Z0-9]/g, '');
-            expo.android.package = 'com.mgx.' + slug.toLowerCase();
+            const chatId = process.env.CHAT_ID || '';
+            if (!/^[a-f0-9]{32}$/i.test(chatId)) throw new Error('Missing or invalid CHAT_ID');
+            expo.android.package = 'com.mgx.app' + chatId.toLowerCase();
             console.log('Injected android.package:', expo.android.package);
           } else {
             console.log('android.package already set:', expo.android.package);
