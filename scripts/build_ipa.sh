@@ -75,6 +75,10 @@ stage=archive
 workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' -type d -print -quit)
 test -n "$workspace"
 scheme=$(basename "$workspace" .xcworkspace)
+# Generated names such as Expo can collide with CocoaPods library schemes.
+mv "ios/$scheme.xcodeproj/xcshareddata/xcschemes/$scheme.xcscheme" \
+  "ios/$scheme.xcodeproj/xcshareddata/xcschemes/AtomsApplication.xcscheme"
+scheme=AtomsApplication
 xcode-project build-ipa --workspace "$workspace" --scheme "$scheme"
 stage=upload
 artifact=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -type f -print -quit)
