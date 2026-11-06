@@ -13,14 +13,17 @@ finish() {
   trap - EXIT
   export IPA_STATUS="$status" IPA_STAGE="$stage" IPA_SIZE="$artifact_size" IPA_LOG="$work_dir/build.log"
   python3 - <<'PY' > "$work_dir/status.json"
-import json, os, pathlib
+import json, os, pathlib, re
 log = pathlib.Path(os.environ["IPA_LOG"])
 detail = log.read_text(errors="replace") if log.exists() else ""
 for name in ("APP_STORE_CONNECT_PRIVATE_KEY", "CERTIFICATE_PRIVATE_KEY", "APP_STORE_CONNECT_ISSUER_ID", "APP_STORE_CONNECT_KEY_IDENTIFIER", "CODE_URL", "ARTIFACT_UPLOAD_URL", "STATUS_UPLOAD_URL"):
     for value in [os.environ.get(name, ""), *os.environ.get(name, "").splitlines()]:
         if value:
             detail = detail.replace(value, "[redacted]")
-json.dump({"status": os.environ["IPA_STATUS"], "error": "" if os.environ["IPA_STATUS"] == "success" else "iOS build failed at " + os.environ["IPA_STAGE"] + "\n" + detail[-4000:], "artifact_size": int(os.environ["IPA_SIZE"])}, __import__('sys').stdout)
+detail = re.sub(r"\x1b\[[0-9;]*m", "", detail)
+errors = [line for line in detail.splitlines() if re.search(r"\berror:|Error:|❌", line)]
+detail = ("\n".join(errors[:20])[:2000] + "\n" + detail[-2000:])[-4000:]
+json.dump({"status": os.environ["IPA_STATUS"], "error": "" if os.environ["IPA_STATUS"] == "success" else "iOS build failed at " + os.environ["IPA_STAGE"] + "\n" + detail, "artifact_size": int(os.environ["IPA_SIZE"])}, __import__('sys').stdout)
 PY
   curl --fail --silent --show-error -X PUT -H 'Content-Type: application/json' --data-binary "@$work_dir/status.json" "$STATUS_UPLOAD_URL" || exit_code=1
   keychain delete >/dev/null 2>&1 || true
@@ -75,9 +78,21 @@ stage=archive
 workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' -type d -print -quit)
 test -n "$workspace"
 scheme=$(basename "$workspace" .xcworkspace)
-# Generated names such as Expo can collide with CocoaPods library schemes.
-mv "ios/$scheme.xcodeproj/xcshareddata/xcschemes/$scheme.xcscheme" \
-  "ios/$scheme.xcodeproj/xcshareddata/xcschemes/AtomsApplication.xcscheme"
+# Generated names such as Expo can collide with dependency modules and schemes.
+node <<'JS'
+const fs = require('node:fs');
+const { IOSConfig } = require('expo/config-plugins');
+const project = IOSConfig.XcodeUtils.getPbxproj(process.cwd());
+const { target } = project.getTarget('com.apple.product-type.application');
+for (const [, config] of IOSConfig.XcodeUtils.getBuildConfigurationsForListId(project, target.buildConfigurationList)) {
+  config.buildSettings.PRODUCT_MODULE_NAME = 'AtomsApplication';
+}
+fs.writeFileSync(project.filepath, project.writeSync());
+JS
+if [ "$scheme" != AtomsApplication ]; then
+  mv "ios/$scheme.xcodeproj/xcshareddata/xcschemes/$scheme.xcscheme" \
+    "ios/$scheme.xcodeproj/xcshareddata/xcschemes/AtomsApplication.xcscheme"
+fi
 scheme=AtomsApplication
 xcode-project build-ipa --workspace "$workspace" --scheme "$scheme"
 stage=upload
