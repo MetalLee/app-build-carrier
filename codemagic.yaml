@@ -40,7 +40,7 @@ workflows:
       - name: Prepare Expo config
         script: |
           cd $CM_BUILD_DIR
-          ./node_modules/.bin/expo config --type public --json > /tmp/resolved-expo.json
+          ./node_modules/.bin/expo config --json > /tmp/resolved-expo.json
           node -e "
           const fs = require('fs');
           const expo = require('./scripts/apply_mobile_icon.cjs')(JSON.parse(fs.readFileSync('/tmp/resolved-expo.json', 'utf8')));

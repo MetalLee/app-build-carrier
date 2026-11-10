@@ -57,7 +57,7 @@ else
   exit 1
 fi
 stage=configuration
-./node_modules/.bin/expo config --type public --json > "$work_dir/expo.json"
+./node_modules/.bin/expo config --json > "$work_dir/expo.json"
 node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" <<'JS'
 const fs = require('node:fs');
 const expo = require(process.argv[3])(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
