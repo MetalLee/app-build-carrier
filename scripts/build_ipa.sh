@@ -58,9 +58,9 @@ else
 fi
 stage=configuration
 ./node_modules/.bin/expo config --type public --json > "$work_dir/expo.json"
-node - "$work_dir/expo.json" <<'JS'
+node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" <<'JS'
 const fs = require('node:fs');
-const expo = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const expo = require(process.argv[3])(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
 expo.version = process.env.APP_VERSION;
 expo.ios = { ...expo.ios, bundleIdentifier: process.env.BUNDLE_ID, buildNumber: process.env.BUILD_NUMBER };
 fs.writeFileSync('app.json', JSON.stringify({ expo }));
