@@ -36,7 +36,7 @@ workflows:
         script: |
           cd $CM_BUILD_DIR
           if [ -f pnpm-lock.yaml ]; then
-            corepack pnpm install --frozen-lockfile --shamefully-hoist
+            corepack pnpm install --frozen-lockfile
           elif [ -f package-lock.json ]; then
             npm ci
           else
