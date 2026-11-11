@@ -50,6 +50,7 @@ workflows:
           node -e "
           const fs = require('fs');
           const expo = require('./scripts/apply_mobile_icon.cjs')(JSON.parse(fs.readFileSync('/tmp/resolved-expo.json', 'utf8')));
+          require('./scripts/validate_mobile_config.cjs')(expo);
           if (!expo.android) expo.android = {};
           if (!expo.android.package) {
             const chatId = process.env.CHAT_ID || '';

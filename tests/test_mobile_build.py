@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -13,7 +14,7 @@ WORKFLOW = yaml.safe_load((Path(__file__).resolve().parents[1] / 'codemagic.yaml
 class MobileBuildTests(unittest.TestCase):
     def test_pnpm_lock_is_frozen_and_npm_projects_still_work(self):
         script = next(s['script'] for s in WORKFLOW['scripts'] if s['name'] == 'Install dependencies')
-        for lock, expected in [('pnpm-lock.yaml', 'corepack pnpm install --frozen-lockfile --shamefully-hoist'),
+        for lock, expected in [('pnpm-lock.yaml', 'corepack pnpm install --frozen-lockfile'),
                                ('package-lock.json', 'npm ci'), (None, 'npm install')]:
             with self.subTest(lock=lock), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -35,6 +36,16 @@ class MobileBuildTests(unittest.TestCase):
                 root = Path(tmp)
                 config = {'expo': {'slug': 'new-project', 'scheme': 'atoms-mobile', 'plugins': ['expo-secure-store']}}
                 (root / 'app.json').write_text(json.dumps(config))
+                # Model Expo CLI's resolved config while exercising the real carrier script.
+                executable = root / 'node_modules/.bin/expo'
+                executable.parent.mkdir(parents=True)
+                executable.write_text("#!/usr/bin/env node\nconsole.log(JSON.stringify(require(process.cwd() + '/app.json').expo));\n")
+                executable.chmod(0o755)
+                (root / 'scripts').mkdir()
+                shutil.copyfile(Path(__file__).resolve().parents[1] / 'scripts/apply_mobile_icon.cjs',
+                                root / 'scripts/apply_mobile_icon.cjs')
+                shutil.copyfile(Path(__file__).resolve().parents[1] / 'scripts/validate_mobile_config.cjs',
+                                root / 'scripts/validate_mobile_config.cjs')
                 backend = b'{"environment":"PROD","baseUrl":"https://app.example.com"}'
                 (root / 'mobile-backend.json').write_bytes(backend)
                 env = {**os.environ, 'CM_BUILD_DIR': tmp, 'CHAT_ID': chat_id}

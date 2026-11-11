@@ -2,7 +2,7 @@
 set -euo pipefail
 set +x
 : "${CODE_URL:?}" "${ARTIFACT_UPLOAD_URL:?}" "${STATUS_UPLOAD_URL:?}"
-: "${BUNDLE_ID:?}" "${APP_VERSION:?}" "${BUILD_NUMBER:?}"
+: "${BUNDLE_ID:?}" "${BUILD_NUMBER:?}"
 : "${APP_STORE_CONNECT_PRIVATE_KEY:?}" "${CERTIFICATE_PRIVATE_KEY:?}"
 work_dir=$(mktemp -d)
 status=failed
@@ -58,10 +58,15 @@ else
 fi
 stage=configuration
 ./node_modules/.bin/expo config --json > "$work_dir/expo.json"
-node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" <<'JS'
+node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" "$CM_BUILD_DIR/scripts/validate_mobile_config.cjs" <<'JS'
 const fs = require('node:fs');
 const expo = require(process.argv[3])(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
-expo.version = process.env.APP_VERSION;
+require(process.argv[4])(expo);
+const version = expo.version ?? '1.0.0';
+if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+  throw new Error('Set a numeric three-part Expo application version');
+}
+expo.version = version;
 expo.ios = { ...expo.ios, bundleIdentifier: process.env.BUNDLE_ID, buildNumber: process.env.BUILD_NUMBER };
 fs.writeFileSync('app.json', JSON.stringify({ expo }));
 for (const name of ['app.config.js', 'app.config.ts']) fs.rmSync(name, { force: true });
