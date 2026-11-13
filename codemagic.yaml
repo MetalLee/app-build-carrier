@@ -20,7 +20,7 @@ workflows:
         BUILD_TARGET: "apk"
         ARTIFACT_UPLOAD_URL: "PLACEHOLDER"
         STATUS_UPLOAD_URL: "PLACEHOLDER"
-      node: 20
+      node: 22.14.0
       java: 17
     scripts:
       - name: Download and extract source
