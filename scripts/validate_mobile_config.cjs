@@ -23,7 +23,7 @@ module.exports = function validateMobileConfig(expo, root = process.cwd()) {
     if (schemes.length !== 1 || schemes[0] !== scheme) {
       throw new Error('Mobile native callback must match the consumer project');
     }
-  } else if (backend && !schemes.includes('atoms-mobile')) {
-    throw new Error('Mobile native callback must match the registered atoms-mobile scheme');
+  } else if (backend) {
+    throw new Error('Mobile backend requires a registered Native consumer');
   }
 };

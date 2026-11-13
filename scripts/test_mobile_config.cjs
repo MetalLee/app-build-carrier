@@ -12,11 +12,9 @@ test('native callback is checked against resolved config only when backend is en
     fs.writeFileSync(path.join(root, 'mobile-backend.json'), 'null');
     validate({}, root);
     fs.writeFileSync(path.join(root, 'mobile-backend.json'), JSON.stringify({baseUrl: 'https://api.example'}));
-    for (const scheme of [undefined, 'other', ['other']]) {
-      assert.throws(() => validate({scheme}, root), /registered atoms-mobile/);
+    for (const scheme of [undefined, 'other', ['other'], 'atoms-mobile', ['other', 'atoms-mobile']]) {
+      assert.throws(() => validate({scheme}, root), /registered Native consumer/);
     }
-    validate({scheme: 'atoms-mobile'}, root);
-    validate({scheme: ['other', 'atoms-mobile']}, root);
   } finally {
     fs.rmSync(root, {recursive: true, force: true});
   }
@@ -26,7 +24,7 @@ test('new consumer schemes match installed config, independent of backend owner'
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-consumer-'));
   const previous = process.env.CHAT_ID;
   try {
-    fs.writeFileSync(path.join(root, 'mobile-backend.json'), JSON.stringify({ projectId: 'shared-owner' }));
+    fs.writeFileSync(path.join(root, 'mobile-backend.json'), JSON.stringify({ baseUrl: 'https://shared-backend.example' }));
     for (const consumer of ['app-a', 'app-b']) {
       process.env.CHAT_ID = consumer;
       const scheme = 'atoms-' + require('node:crypto').createHash('sha256').update(consumer).digest('hex').slice(0, 24);
@@ -49,7 +47,7 @@ test('new consumer schemes match installed config, independent of backend owner'
 test('dynamic config cannot switch legacy and consumer protocols or swap consumers', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-protocol-'));
   try {
-    fs.writeFileSync(path.join(root, 'mobile-backend.json'), '{"projectId":"owner"}');
+    fs.writeFileSync(path.join(root, 'mobile-backend.json'), '{"baseUrl":"https://backend.example"}');
     const consumer = { scheme: 'atoms-' + require('node:crypto').createHash('sha256').update('app-a').digest('hex').slice(0, 24),
       extra: { nativeAuthVersion: 2, nativeAuthConsumerId: 'app-a' } };
     const legacy = { scheme: 'atoms-mobile' };
@@ -60,6 +58,6 @@ test('dynamic config cannot switch legacy and consumer protocols or swap consume
     }
     fs.unlinkSync(path.join(root, 'app.json'));
     assert.throws(() => validate(consumer, root), /preserve the platform Native auth identity/);
-    validate(legacy, root);
+    assert.throws(() => validate(legacy, root), /registered Native consumer/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
