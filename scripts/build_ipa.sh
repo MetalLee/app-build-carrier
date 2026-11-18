@@ -76,7 +76,18 @@ stage=prebuild
 (cd ios && pod install)
 stage=signing
 keychain initialize
-app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+signing_log="$work_dir/fetch-signing.log"
+app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create > "$signing_log" 2>&1 || {
+  signing_exit=$?
+  cat "$signing_log"
+  if grep -Fq 'Did not find any Signing Certificates for given private key' "$signing_log" &&
+     grep -F 'POST https://api.appstoreconnect.apple.com/v1/certificates returned 409' "$signing_log" |
+       grep -F 'already have a current Distribution certificate or a pending certificate request' >/dev/null; then
+    echo 'Error: No Distribution certificate matches the signing private key. Restore the matching certificate private key or ask your Apple team administrator to check existing Distribution certificates and pending requests.'
+  fi
+  exit "$signing_exit"
+}
+cat "$signing_log"
 keychain add-certificates
 xcode-project use-profiles
 stage=archive

@@ -36,3 +36,21 @@ def test_ipa_validates_effective_config_without_overriding_its_version(tmp_path,
         assert config['plugins'] == effective['plugins']
         assert config['ios'] == {'bundleIdentifier': 'com.example.app', 'buildNumber': '1.2.3'}
         assert not (app / 'app.config.ts').exists()
+
+
+@pytest.mark.parametrize('mismatch,reason,expected', [
+    (True, 'You already have a current Distribution certificate or a pending certificate request.', True),
+    (True, 'Another conflict', False),
+    (False, 'You already have a current Distribution certificate or a pending certificate request.', False),
+])
+def test_signing_conflict_preserves_error(tmp_path, mismatch, reason, expected):
+    log = 'Did not find any Signing Certificates for given private key\n' if mismatch else ''
+    log += 'POST https://api.appstoreconnect.apple.com/v1/certificates returned 409: ' + reason
+    script = (ROOT / 'scripts/build_ipa.sh').read_text().split('keychain initialize\n', 1)[1].split('keychain add-certificates', 1)[0]
+    result = subprocess.run(['bash', '-euo', 'pipefail', '-c',
+                             'app-store-connect() { echo "$LOG" >&2; return 17; }\n' + script],
+                            capture_output=True, text=True, env={**os.environ, 'LOG': log,
+                            'work_dir': str(tmp_path), 'BUNDLE_ID': 'com.test.app'})
+    assert result.returncode == 17
+    assert log in result.stdout
+    assert ('Restore the matching certificate private key' in result.stdout) == expected
