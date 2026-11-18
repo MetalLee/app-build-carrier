@@ -57,8 +57,9 @@ else
   exit 1
 fi
 stage=configuration
+app_module=AtomsApplication
 ./node_modules/.bin/expo config --json > "$work_dir/expo.json"
-node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" "$CM_BUILD_DIR/scripts/validate_mobile_config.cjs" <<'JS'
+node - "$work_dir/expo.json" "$CM_BUILD_DIR/scripts/apply_mobile_icon.cjs" "$CM_BUILD_DIR/scripts/validate_mobile_config.cjs" "$app_module" <<'JS'
 const fs = require('node:fs');
 const expo = require(process.argv[3])(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
 require(process.argv[4])(expo);
@@ -67,7 +68,13 @@ if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
   throw new Error('Set a numeric three-part Expo application version');
 }
 expo.version = version;
-expo.ios = { ...expo.ios, bundleIdentifier: process.env.BUNDLE_ID, buildNumber: process.env.BUILD_NUMBER };
+expo.ios = {
+  ...expo.ios,
+  bundleIdentifier: process.env.BUNDLE_ID,
+  buildNumber: process.env.BUILD_NUMBER,
+  // Expo resolves the generated native modules provider using the Swift module name.
+  infoPlist: { ...expo.ios?.infoPlist, ExpoModulesProviderModuleName: process.argv[5] },
+};
 fs.writeFileSync('app.json', JSON.stringify({ expo }));
 for (const name of ['app.config.js', 'app.config.ts']) fs.rmSync(name, { force: true });
 JS
@@ -95,22 +102,21 @@ workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' -type d -print -quit)
 test -n "$workspace"
 scheme=$(basename "$workspace" .xcworkspace)
 # Generated names such as Expo can collide with dependency modules and schemes.
-node <<'JS'
+node - "$app_module" <<'JS'
 const fs = require('node:fs');
 const { IOSConfig } = require('expo/config-plugins');
 const project = IOSConfig.XcodeUtils.getPbxproj(process.cwd());
 const { target } = project.getTarget('com.apple.product-type.application');
 for (const [, config] of IOSConfig.XcodeUtils.getBuildConfigurationsForListId(project, target.buildConfigurationList)) {
-  config.buildSettings.PRODUCT_MODULE_NAME = 'AtomsApplication';
+  config.buildSettings.PRODUCT_MODULE_NAME = process.argv[2];
 }
 fs.writeFileSync(project.filepath, project.writeSync());
 JS
-if [ "$scheme" != AtomsApplication ]; then
+if [ "$scheme" != "$app_module" ]; then
   mv "ios/$scheme.xcodeproj/xcshareddata/xcschemes/$scheme.xcscheme" \
-    "ios/$scheme.xcodeproj/xcshareddata/xcschemes/AtomsApplication.xcscheme"
+    "ios/$scheme.xcodeproj/xcshareddata/xcschemes/$app_module.xcscheme"
 fi
-scheme=AtomsApplication
-xcode-project build-ipa --workspace "$workspace" --scheme "$scheme"
+xcode-project build-ipa --workspace "$workspace" --scheme "$app_module"
 stage=upload
 artifact=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -type f -print -quit)
 test -n "$artifact"
